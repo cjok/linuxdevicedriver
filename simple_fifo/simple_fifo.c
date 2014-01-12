@@ -14,8 +14,9 @@
 #include <asm/uaccess.h>
 #include <linux/slab.h>    /* kmalloc */
 #include <linux/device.h>         /* device_create, class_create */
+#include <linux/poll.h>
 
-#include "simple_cdev.h"
+#include "simple_fifo.h"
 
 struct simple_chrdev *dev;
 static unsigned int major_no = 0;
@@ -39,25 +40,36 @@ static ssize_t simple_read(struct file *filp, char __user *buf, size_t count,
                                                                  loff_t *f_pos)
 {
          struct simple_chrdev *dev = filp->private_data;
-         unsigned long pos = *f_pos;
          int ret = 0;
  
 	 mutex_lock(&dev->mutex);
-         if(pos >= MAX_SIZE) {
-                ret= - EFAULT;
-		goto out;
-	 }
+
+	 while (dev->current_len == 0) {
+		mutex_unlock(&dev->mutex);
+	  	if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		printk("%s: reading going to sleep\n", current->comm);
+		if (wait_event_interruptible(dev->r_wait, dev->current_len != 0)) {
+			return -ERESTARTSYS;
+		}
+
+		mutex_lock(&dev->mutex);
+ 	 }
  
-         if(count > MAX_SIZE - pos)
-                   count= MAX_SIZE - pos;
+         if(count > dev->current_len)
+                   count= dev->current_len;
         
-         if(copy_to_user(buf, (void *)(dev->mem + pos), count)) {
+         if(copy_to_user(buf, (void *)(dev->mem), count)) {
                    ret= -EFAULT;
                    goto out;
-         }
-         *f_pos+= count;
-         ret= count;
- 
+         } else {
+		memcpy(dev->mem, dev->mem + count, dev->current_len - count);
+	 	dev->current_len -= count;
+         	ret = count;
+		wake_up_interruptible(&dev->w_wait);
+		printk("%s: read %d bytes\n", current->comm, count);
+	 }
+
 out:
 	 mutex_unlock(&dev->mutex);
          return ret;
@@ -67,55 +79,38 @@ static ssize_t simple_write(struct file *filp, const char __user *buf,
                                      size_t count, loff_t *f_pos)
 {
          struct simple_chrdev *dev = filp->private_data;
-         unsigned long pos = *f_pos;
          int ret = 0;
  
 	 mutex_lock(&dev->mutex);
-         if(pos >= MAX_SIZE) {
-                ret= - EFAULT;
-		goto out;
+
+	 while (dev->current_len >= MAX_SIZE) {
+		mutex_unlock(&dev->mutex);
+	  	if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		printk("%s: writing going to sleep\n", current->comm);
+		if (wait_event_interruptible(dev->w_wait, dev->current_len < MAX_SIZE)) {
+			return -ERESTARTSYS;
+		}
+
+		mutex_lock(&dev->mutex);
 	 }
  
-         if(count > MAX_SIZE - pos)
-                   count= MAX_SIZE - pos;
+         if(count > MAX_SIZE - dev->current_len)
+                   count = MAX_SIZE - dev->current_len;
  
-         if(copy_from_user(dev->mem + pos, buf, count)) {
+         if(copy_from_user(dev->mem + dev->current_len, buf, count)) {
                    ret= - EFAULT;
                    goto out;
-         }
-         *f_pos+= count;
-         ret= count;
+         } else {
+	 	dev->current_len += count;
+         	ret= count;
+		wake_up_interruptible(&dev->r_wait);
+		printk("%s: write %d bytes\n", current->comm, count);
+	 }
  
 out:
 	 mutex_unlock(&dev->mutex);
          return ret;
-}
-
-loff_t simple_llseek(struct file *filp,loff_t off, int whence)
-{
-         loff_t newpos;
- 
-         switch(whence) {
-                   case 0:     /*SEEK_SET*/
-                            newpos= off;
-                            break;
-                  
-                   case 1:     /*SEEK_CUR*/
-                            newpos= filp->f_pos + off;
-                            break;
- 
-                   case 2:     /*SEEK_END*/
-                            newpos= MAX_SIZE + off;
-                            break;
-                  
-                   default:
-                            return-EINVAL;
-         }
- 
-         if(newpos < 0)
-                   return-EINVAL;
-         filp->f_pos= newpos;
-         return newpos;
 }
 
 long simple_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -124,6 +119,7 @@ long simple_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		int ret = 0;
 		struct simple_chrdev *dev = filp->private_data;
 
+		//check magic code
 		if (_IOC_TYPE(cmd) != SIMPLE_MAGIC)	
 				return -ENOTTY;
 		if (_IOC_NR(cmd) > SIMPLE_MAX)
@@ -138,6 +134,7 @@ long simple_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		if (_IOC_DIR(cmd) & _IOC_WRITE)
 				err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
 		if (err) return -EFAULT;
+		//////
 
 		switch(cmd) {
 			case SIMPLE_GET_NAME:	
@@ -171,16 +168,33 @@ long simple_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 
 		return ret;
 }
+ 
+static unsigned int simple_poll(struct file *filp, poll_table *wait)
+{
+	unsigned int mask = 0;
+	struct simple_chrdev *dev = filp->private_data;
 
+	mutex_lock(&dev->mutex);
+	poll_wait(filp, &dev->r_wait, wait);
+	poll_wait(filp, &dev->w_wait, wait);
 
+	if (dev->current_len != 0)
+		mask |= POLLIN | POLLRDNORM;
+	if (dev->current_len < MAX_SIZE)
+		mask |= POLLOUT | POLLWRNORM;
+
+	mutex_unlock(&dev->mutex);
+	return mask;	
+}
+ 
 struct file_operations simple_fops = {
          .owner     = THIS_MODULE,
-         .llseek       = simple_llseek,
          .read         = simple_read,
          .write       = simple_write,
          .open        = simple_open,
          .release   = simple_release,
 	 .unlocked_ioctl = simple_unlocked_ioctl,
+	 .poll	= simple_poll,
 };
 
 static int __init simple_chrdev_init(void)
@@ -214,6 +228,8 @@ static int __init simple_chrdev_init(void)
 	 strcpy(dev->info.author_name, "paul");
 	
 	 mutex_init(&dev->mutex);	//init mutex
+	 init_waitqueue_head(&dev->r_wait);
+	 init_waitqueue_head(&dev->w_wait);
  
          cdev_init(&dev->cdev, &simple_fops);
          dev->cdev.owner= THIS_MODULE;

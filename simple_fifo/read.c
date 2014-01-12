@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <linux/ioctl.h>
 
-#define PATH	"/dev/simple_chrdev"
+#define PATH	"/dev/simple_fifo"
 
 //ioctl commands define
 #define SIMPLE_MAGIC	's'
@@ -30,7 +30,7 @@ int main(void)
 {
 	int fd;
 	int ret = 0;
-	char buff[20] = {0};
+	char buff[512] = {0};
 	char name[20] = "NAMEXXX";
 	struct info info_data;
 	int version;
@@ -43,12 +43,10 @@ int main(void)
 	}
 
 //	write(fd, "hello world", 16);
-	
-	lseek(fd, SEEK_SET, 0);
 
-	read(fd, buff, 20);
+	read(fd, buff, sizeof(buff));
 
-	printf("%s\n", buff);
+	printf("read:%s\n", buff);
 
 	close(fd);
 

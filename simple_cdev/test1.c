@@ -42,13 +42,30 @@ int main(void)
 		return -1;
 	}
 
-//	write(fd, "hello world", 16);
+	write(fd, "hello world", 16);
 	
 	lseek(fd, SEEK_SET, 0);
+
+	sleep(10);
 
 	read(fd, buff, 20);
 
 	printf("%s\n", buff);
+
+	ioctl(fd, SIMPLE_SET_NAME, (unsigned long *)name);
+	ioctl(fd, SIMPLE_GET_NAME, (unsigned long *)buff);
+	printf("%s\n", (char *)buff);
+
+	ioctl(fd, SIMPLE_GET_INFO, (unsigned long *)&info_data);
+	printf("number = %d, name = %s\n", info_data.number, info_data.author_name);
+
+	ioctl(fd, SIMPLE_SET_VERSION_BY_POINTER, &n);
+	ioctl(fd, SIMPLE_GET_VERSION, (unsigned long *)&version);
+	printf("version = %d\n", version);
+
+	ioctl(fd, SIMPLE_SET_VERSION_BY_NUMBER, 6);
+	ioctl(fd, SIMPLE_GET_VERSION, (unsigned long *)&version);
+	printf("version = %d\n", version);
 
 	close(fd);
 
