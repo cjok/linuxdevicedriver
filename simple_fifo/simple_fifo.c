@@ -10,7 +10,6 @@
 #include <linux/sched.h>
 #include <linux/cdev.h>
 #include <asm/io.h>
-#include <asm/system.h>
 #include <asm/uaccess.h>
 #include <linux/slab.h>    /* kmalloc */
 #include <linux/device.h>         /* device_create, class_create */
@@ -22,7 +21,7 @@ struct simple_chrdev *dev;
 static unsigned int major_no = 0;
 static struct class *simple_class;
 
-static int simple_open(struct inode *inode,struct file *filp)
+static int simple_fifo_open(struct inode *inode,struct file *filp)
 {
          struct simple_chrdev *dev;
  
@@ -175,6 +174,13 @@ static unsigned int simple_poll(struct file *filp, poll_table *wait)
 	struct simple_chrdev *dev = filp->private_data;
 
 	mutex_lock(&dev->mutex);
+	/*
+	*这里值得注意的是：poll_wait()不会阻塞，因为poll_wait()并没有调用schedule簇函数，
+	*只是把当前进程加入到等待队列头上(由__pollwait()来完成)，会继续往下执行。阻塞是
+	*由更上层的代码来处理(do_poll()来完成)。
+	*
+	*当事件可用、被信号唤醒或timeout时，会再次执行poll函数。
+	*/
 	poll_wait(filp, &dev->r_wait, wait);
 	poll_wait(filp, &dev->w_wait, wait);
 
@@ -191,7 +197,7 @@ struct file_operations simple_fops = {
          .owner     = THIS_MODULE,
          .read         = simple_read,
          .write       = simple_write,
-         .open        = simple_open,
+         .open        = simple_fifo_open,
          .release   = simple_release,
 	 .unlocked_ioctl = simple_unlocked_ioctl,
 	 .poll	= simple_poll,
