@@ -211,7 +211,7 @@ static int __init simple_chrdev_init(void)
  
          if(major_no) {
                    dev_no= MKDEV(major_no, minor_no);
-                   ret= register_chrdev_region(dev_no, 1, CLASS_NAME);
+                   ret= register_chrdev_region(dev_no, 1, CHRDEV_NAME);
          }else {
                    ret= alloc_chrdev_region(&dev_no, minor_no, 1, CHRDEV_NAME);
                    major_no= MAJOR(dev_no);
@@ -247,7 +247,7 @@ static int __init simple_chrdev_init(void)
          }
  
          /*autocreate device inode file*/
-         simple_class= class_create(THIS_MODULE, CHRDEV_NAME);
+         simple_class= class_create(THIS_MODULE, CLASS_NAME);
          if(IS_ERR(simple_class)) {
                    printk("ERR:cannot create a simple_class");
                    goto err_class_crt;
