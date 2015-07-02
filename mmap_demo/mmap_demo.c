@@ -1,5 +1,9 @@
 /*
 * for learn mmap
+  mmap: 作用是将用户空间的一段虚拟地址映射到设备的IO空间(物理地址)，
+  这样一来，用户空间进程将可以直接访问设备的内存，比如Framebuffer。
+  嵌入式设备中没有显存，所以在主内存中分配一块内存作为显存，通过mmap
+  映射到用户空间，用户空间可以直接访问FB。
 */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -61,9 +65,12 @@ static int __init demo_mmap_init(void)
 	int err = 0;
 	char *kstr;
 
+	//在高端物理内存区分配一个页面
 	pg = alloc_pages(GFP_HIGHUSER, 0);
 	//SetPageReserved(pg);
 	
+	//因为物理页面来自高端内存，所以在使用前需要调用kmap为该物理
+	//页面简历映射关系
 	kstr = (char *)kmap(pg);
 	strcpy(kstr, KSTR_DEF);
 	printk("kpa = 0x%X, kernel string = %s\n", 
@@ -77,6 +84,7 @@ static int __init demo_mmap_init(void)
 	pcdev->owner = THIS_MODULE;
 	cdev_add(pcdev, ndev, 1);
 
+	//创建定时器每隔10秒打印一次被映射的物理页面中的内容
 	init_timer(&timer);
 	timer.function = timer_func;
 	timer.data = (unsigned long)kstr;
