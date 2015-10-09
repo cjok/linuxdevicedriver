@@ -7,7 +7,5 @@ it is ok!
 it is error!
 it is end!
 
-it is branch test!
-
-master brach conflict
+11branch:test conflict 
 
