@@ -7,3 +7,5 @@ it is ok!
 it is error!
 it is end!
 
+branch:test conflict 
+
