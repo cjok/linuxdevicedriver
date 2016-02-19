@@ -6,6 +6,7 @@
 
 static struct work_struct ws;
 
+//work 处理函数
 static void handler(struct work_struct *work)
 {
 	printk("handler...\n");
@@ -13,8 +14,10 @@ static void handler(struct work_struct *work)
 
 static int __init test_init(void)
 {
+	//初始化work
 	INIT_WORK(&ws, handler);
 
+	//调度执行work
 	schedule_work(&ws);
 
 	printk("%s", __func__);	
